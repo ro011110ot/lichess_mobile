@@ -13,6 +13,7 @@ import 'package:lichess_mobile/src/model/account/account_service.dart';
 import 'package:lichess_mobile/src/model/account/ongoing_game.dart';
 import 'package:lichess_mobile/src/model/challenge/challenge_service.dart';
 import 'package:lichess_mobile/src/model/common/preloaded_data.dart';
+import 'package:lichess_mobile/src/model/common/service/sound_service.dart';
 import 'package:lichess_mobile/src/model/correspondence/correspondence_service.dart';
 import 'package:lichess_mobile/src/model/message/message_service.dart';
 import 'package:lichess_mobile/src/model/notifications/notification_service.dart';
@@ -83,10 +84,23 @@ class _AppState extends ConsumerState<Application> {
     ref.read(correspondenceServiceProvider).start();
     ref.read(quickActionServiceProvider).start();
 
-    // Listen for connectivity changes and perform actions accordingly.
+    // Listen for connectivity, app lifecycle changes and perform actions accordingly.
     ref.listenManual(connectivityChangesProvider, (prev, current) async {
-      final prevWasOffline = prev?.value?.isOnline == false;
-      final currentIsOnline = current.value?.isOnline == true;
+      final currentStatus = current.value;
+      if (currentStatus == null) return;
+
+      final prevStatus = prev?.value;
+
+      if (prevStatus != null && currentStatus.appState != prevStatus.appState) {
+        if (currentStatus.appState == AppLifecycleState.paused) {
+          ref.read(soundServiceProvider).release();
+        } else if (currentStatus.appState == AppLifecycleState.resumed) {
+          await SoundService.initialize();
+        }
+      }
+
+      final prevWasOffline = prevStatus?.isOnline == false;
+      final currentIsOnline = currentStatus.isOnline == true;
 
       // Play registered moves whenever the app comes back online.
       if (prevWasOffline && currentIsOnline) {
@@ -97,17 +111,17 @@ class _AppState extends ConsumerState<Application> {
       }
 
       // Perform actions once when the app comes online.
-      if (current.value?.isOnline == true && !_firstTimeOnlineCheck) {
+      if (currentStatus.isOnline == true && !_firstTimeOnlineCheck) {
         _firstTimeOnlineCheck = true;
         ref.read(correspondenceServiceProvider).syncGames();
       }
 
       final socketClient = ref.read(socketPoolProvider).currentClient;
-      if (current.value?.isOnline == true &&
-          current.value?.appState == AppLifecycleState.resumed &&
+      if (currentStatus.isOnline == true &&
+          currentStatus.appState == AppLifecycleState.resumed &&
           !socketClient.isActive) {
         socketClient.connect();
-      } else if (current.value?.isOnline == false) {
+      } else if (currentStatus.isOnline == false) {
         socketClient.close();
       }
     });
